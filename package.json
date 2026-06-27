@@ -1,0 +1,50 @@
+{
+  "name": "pi-big-brain-plan",
+  "version": "0.0.0",
+  "description": "Implementation spec planner for Pi: break problems into ordered vertical slices with codebase-aware reasoning.",
+  "type": "module",
+  "license": "MIT",
+  "author": "Dan <dan@dragomirweb.com>",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/dragomirweb/pi-big-brain-plan.git"
+  },
+  "homepage": "https://github.com/dragomirweb/pi-big-brain-plan#readme",
+  "bugs": {
+    "url": "https://github.com/dragomirweb/pi-big-brain-plan/issues"
+  },
+  "keywords": [
+    "pi-package",
+    "pi-extension",
+    "planning",
+    "implementation-specs",
+    "vertical-slicing"
+  ],
+  "engines": {
+    "node": ">=22.19.0"
+  },
+  "pi": {
+    "extensions": ["./src/index.ts"]
+  },
+  "files": ["src/", "README.md", "LICENSE"],
+  "scripts": {
+    "typecheck": "tsc --noEmit",
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "lint": "biome check .",
+    "format": "biome format --write .",
+    "check": "biome check . && tsc --noEmit && vitest run"
+  },
+  "peerDependencies": {
+    "@earendil-works/pi-coding-agent": "*",
+    "typebox": "*"
+  },
+  "devDependencies": {
+    "@earendil-works/pi-coding-agent": "0.80.2",
+    "typebox": "*",
+    "@types/node": "^22.0.0",
+    "@biomejs/biome": "^1.9.0",
+    "typescript": "^5.6.0",
+    "vitest": "^2.1.0"
+  }
+}
