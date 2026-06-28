@@ -11,6 +11,7 @@ interface MockPiOptions {
   flags?: Record<string, boolean | string>;
   models?: MockModel[];
   currentModel?: MockModel;
+  activeTools?: string[];
 }
 
 interface MockEntry {
@@ -31,6 +32,7 @@ export function makeMockPi(opts?: MockPiOptions) {
   const entries: MockEntry[] = [];
   const commands = new Map<string, CommandDefinition>();
   const tools = new Map<string, ToolDefinition>();
+  const activeTools = [...(opts?.activeTools ?? [])];
   const flags = new Map<string, boolean | string | undefined>(Object.entries(opts?.flags ?? {}));
   const onHandlers = new Map<string, LifecycleHandler[]>();
   const eventBus = new EventEmitter();
@@ -74,6 +76,10 @@ export function makeMockPi(opts?: MockPiOptions) {
       if (!flags.has(name) && def.default !== undefined) flags.set(name, def.default);
     },
     getFlag: (name: string) => flags.get(name),
+    getActiveTools: () => [...activeTools],
+    setActiveTools: (toolNames: string[]) => {
+      activeTools.splice(0, activeTools.length, ...toolNames);
+    },
     on: (event: string, handler: LifecycleHandler) => {
       const handlers = onHandlers.get(event) ?? [];
       handlers.push(handler);
@@ -98,5 +104,5 @@ export function makeMockPi(opts?: MockPiOptions) {
     return last;
   };
 
-  return { pi, ctx, entries, commands, tools, flags, notifications, dispatch };
+  return { pi, ctx, entries, commands, tools, activeTools, flags, notifications, dispatch };
 }
