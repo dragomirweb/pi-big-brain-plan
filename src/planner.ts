@@ -17,6 +17,7 @@ import {
   generatePlanId,
   toTask,
 } from "./state.ts";
+import { buildBridgeTask, runViaBridge } from "./subagent-bridge.ts";
 import { type PlannerDetails, isModelUnavailable, runSubagent, toError } from "./subagent.ts";
 
 type PlanParamsT = Static<typeof PlanParams>;
@@ -37,51 +38,101 @@ export function registerPlanTool(pi: ExtensionAPI, state: PlanState): void {
       onUpdate: AgentToolUpdateCallback<PlannerDetails> | undefined,
       ctx: ExtensionContext,
     ): Promise<AgentToolResult<PlannerDetails>> => {
-      const models = [state.config.plannerModel, ...state.config.fallbackModels].filter(Boolean);
-      let lastErr: Error | null = null;
-
       const relPath = planFilePath(ctx.cwd);
-      const task = assembleTask(params, state.currentPlan, relPath);
+      const result = await runPlannerWithBridge(pi, state, params, relPath, signal, onUpdate, ctx);
 
-      for (const model of models) {
-        try {
-          const result = await runSubagent(
-            model,
-            plannerSystemPrompt(!!state.currentPlan && !!params.feedback, params.feedback, relPath),
-            task,
-            "read,grep,find,ls,bash",
-            signal,
-            onUpdate,
-            ctx.cwd,
-          );
+      const text =
+        result.content?.[0]?.type === "text" ? (result.content[0] as { text: string }).text : "";
 
-          const text =
-            result.content?.[0]?.type === "text"
-              ? (result.content[0] as { text: string }).text
-              : "";
-
-          const parsed = extractPlanJson(text);
-          if (parsed) {
-            const plan = toPlan(parsed, params.problem, state.currentPlan);
-            state.currentPlan = plan;
-            persist(pi, state, ctx.cwd);
-          }
-
-          return result;
-        } catch (err) {
-          lastErr = toError(err);
-          if (!isModelUnavailable(lastErr)) throw lastErr;
-        }
+      const parsed = extractPlanJson(text);
+      if (parsed) {
+        const plan = toPlan(parsed, params.problem, state.currentPlan);
+        state.currentPlan = plan;
+        persist(pi, state, ctx.cwd);
       }
 
-      throw new Error(
-        `big_brain_plan failed for all models [${models.join(", ")}]: ${lastErr?.message ?? "unknown"}`,
-      );
+      return result;
     },
   });
 }
 
-function assembleTask(
+async function runPlannerWithBridge(
+  pi: ExtensionAPI,
+  state: PlanState,
+  params: PlanParamsT,
+  planFileRelPath: string,
+  signal: AbortSignal | undefined,
+  onUpdate: AgentToolUpdateCallback<PlannerDetails> | undefined,
+  ctx: ExtensionContext,
+): Promise<AgentToolResult<PlannerDetails>> {
+  const hasExistingPlan = !!state.currentPlan && !!params.feedback;
+  const taskBody = `Plan an implementation for:\n\n${params.problem}${
+    params.context ? `\n\n## Context\n${params.context}` : ""
+  }`;
+
+  const dynamicContext = buildDynamicPlannerContext(
+    hasExistingPlan,
+    params.feedback,
+    planFileRelPath,
+  );
+  const reads = [...(hasExistingPlan ? [planFileRelPath] : []), ...(params.reads ?? [])];
+
+  const bridgeTask = buildBridgeTask(taskBody, dynamicContext, reads);
+  const bridgeResult = await runViaBridge(
+    pi,
+    ctx,
+    "big-brain-planner",
+    bridgeTask,
+    signal,
+    onUpdate,
+  );
+  if (bridgeResult) return bridgeResult;
+
+  // Fallback: use our own process spawner
+  const fallbackTask = assembleFallbackTask(params, state.currentPlan, planFileRelPath);
+  const models = [state.config.plannerModel, ...state.config.fallbackModels].filter(Boolean);
+  let lastErr: Error | null = null;
+
+  for (const model of models) {
+    try {
+      return await runSubagent(
+        model,
+        plannerSystemPrompt(hasExistingPlan, params.feedback, planFileRelPath),
+        fallbackTask,
+        "read,grep,find,ls,bash",
+        signal,
+        onUpdate,
+        ctx.cwd,
+      );
+    } catch (err) {
+      lastErr = toError(err);
+      if (!isModelUnavailable(lastErr)) throw lastErr;
+    }
+  }
+
+  throw new Error(
+    `big_brain_plan failed for all models [${models.join(", ")}]: ${lastErr?.message ?? "unknown"}`,
+  );
+}
+
+function buildDynamicPlannerContext(
+  hasExistingPlan: boolean,
+  feedback: string | undefined,
+  planFileRelPath: string,
+): string | undefined {
+  const parts: string[] = [];
+  if (hasExistingPlan) {
+    parts.push(
+      `## Existing plan to refine\nThe current plan is stored at \`${planFileRelPath}\`. Read it first.\nIncorporate the feedback and produce an updated plan. Preserve slice IDs where slices remain conceptually the same. You may add, remove, reorder, or merge slices as needed.`,
+    );
+  }
+  if (feedback) {
+    parts.push(`## User feedback to incorporate\n${feedback}`);
+  }
+  return parts.length > 0 ? parts.join("\n\n") : undefined;
+}
+
+function assembleFallbackTask(
   params: PlanParamsT,
   existingPlan: Plan | null,
   planFileRelPath: string,
@@ -94,7 +145,6 @@ function assembleTask(
     task += `\n\n## Feedback on current plan\n${params.feedback}`;
   }
 
-  // Prepend plan file to reads when refining
   const reads = [
     ...(existingPlan && params.feedback ? [planFileRelPath] : []),
     ...(params.reads ?? []),
