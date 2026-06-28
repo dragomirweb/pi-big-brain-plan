@@ -8,6 +8,8 @@ const baseConfig = {
   fallbackModels: [],
 };
 
+const planFileRelPath = ".pi/plans/current.json";
+
 function makePlan(): Plan {
   return {
     id: "plan-test",
@@ -38,28 +40,27 @@ function makePlan(): Plan {
 
 describe("plannerSystemPrompt", () => {
   it("includes vertical slicing principles", () => {
-    const prompt = plannerSystemPrompt(null, undefined);
+    const prompt = plannerSystemPrompt(false, undefined, planFileRelPath);
     expect(prompt).toContain("Vertical slices");
   });
 
-  it("includes existing plan when refining", () => {
-    const plan = makePlan();
-    const prompt = plannerSystemPrompt(plan, "Make it better");
+  it("references the existing plan file when refining", () => {
+    const prompt = plannerSystemPrompt(true, "Make it better", planFileRelPath);
     expect(prompt).toContain("Existing plan to refine");
+    expect(prompt).toContain(planFileRelPath);
+    expect(prompt).toContain("Read it first");
     expect(prompt).toContain("Make it better");
+    expect(prompt).not.toContain("plan-test");
   });
 });
 
 describe("refinerSystemPrompt", () => {
-  it("includes the target slice", () => {
-    const prompt = refinerSystemPrompt(makePlan(), "s1");
+  it("includes the target slice and plan file path", () => {
+    const prompt = refinerSystemPrompt("s1", "S1", planFileRelPath);
     expect(prompt).toContain("s1");
+    expect(prompt).toContain("S1");
+    expect(prompt).toContain(planFileRelPath);
     expect(prompt).toContain("DEEP DIVE");
-  });
-
-  it("handles missing slice gracefully", () => {
-    const prompt = refinerSystemPrompt(makePlan(), "s99");
-    expect(prompt).toContain("No slice found");
   });
 });
 
@@ -75,5 +76,6 @@ describe("planAddendum", () => {
     const addendum = planAddendum(state);
     expect(addendum).toContain("Test");
     expect(addendum).toContain("1 slices");
+    expect(addendum).toContain(planFileRelPath);
   });
 });
