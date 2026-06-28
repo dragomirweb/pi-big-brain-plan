@@ -251,12 +251,14 @@ ${planStatus}`;
 // ---------- Command UI messages ----------
 
 export function planUsage(): string {
-  return "Usage: /plan status | export | reset | model <model-id> | fallback <id[,id]|none> | slice <id> | help";
+  return "Usage: /plan on | off | status | export | reset | model <model-id> | fallback <id[,id]|none> | slice <id> | help";
 }
 
 export function planStatus(state: PlanState): string {
   if (!state.currentPlan) {
-    return "No active plan. Use `big_brain_plan` tool or describe a problem to start planning.";
+    return state.planActive
+      ? "No active plan. Use `big_brain_plan` tool or describe a problem to start planning."
+      : "No active plan. Use `/plan on` to enable planning tools.";
   }
   const plan = state.currentPlan;
   const sliceList = plan.slices.map((s) => `  ${s.id}. [${s.status}] ${s.title}`).join("\n");
