@@ -46,6 +46,7 @@ export interface PlanConfig {
 export interface PlanState {
   currentPlan: Plan | null;
   config: PlanConfig;
+  planActive: boolean;
 }
 
 export interface PlanPersisted {
@@ -57,15 +58,17 @@ export interface PlanPersisted {
 export interface PlanEntryV2 {
   v: 2;
   config: PlanConfig;
+  planActive: boolean;
 }
 
 export interface LoadedPlanState {
   plan: Plan | null;
   config: PlanConfig;
+  planActive: boolean;
 }
 
 export function createPlanState(config: PlanConfig): PlanState {
-  return { currentPlan: null, config };
+  return { currentPlan: null, config, planActive: false };
 }
 
 export function generatePlanId(): string {
