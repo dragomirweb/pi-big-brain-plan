@@ -66,13 +66,13 @@ describe("refinerSystemPrompt", () => {
 
 describe("planAddendum", () => {
   it("shows no-plan message when empty", () => {
-    const state: PlanState = { currentPlan: null, config: baseConfig };
+    const state: PlanState = { currentPlan: null, config: baseConfig, planActive: false };
     const addendum = planAddendum(state);
     expect(addendum).toContain("No active plan");
   });
 
   it("shows plan info when present", () => {
-    const state: PlanState = { currentPlan: makePlan(), config: baseConfig };
+    const state: PlanState = { currentPlan: makePlan(), config: baseConfig, planActive: true };
     const addendum = planAddendum(state);
     expect(addendum).toContain("Test");
     expect(addendum).toContain("1 slices");
