@@ -6,10 +6,9 @@ import type {
 } from "@earendil-works/pi-coding-agent";
 import type { Static } from "typebox";
 
-import { persist } from "./persistence.ts";
-import { extractPlanJson } from "./planner.ts";
+import { persist, planFilePath } from "./persistence.ts";
 import { RefineParams, refineToolDescription, refinerSystemPrompt } from "./prompts.ts";
-import { type PlanState, type PlanTask, REFINE_TOOL } from "./state.ts";
+import { type PlanState, REFINE_TOOL, extractJsonBlock, toTask } from "./state.ts";
 import { type PlannerDetails, isModelUnavailable, runSubagent, toError } from "./subagent.ts";
 
 type RefineParamsT = Static<typeof RefineParams>;
@@ -22,6 +21,7 @@ export function registerRefineTool(pi: ExtensionAPI, state: PlanState): void {
     parameters: RefineParams,
     promptSnippet:
       "refine_slice — deep-dive into one slice of the implementation spec for more detailed analysis.",
+    executionMode: "sequential",
     execute: async (
       _toolCallId: string,
       params: RefineParamsT,
@@ -43,13 +43,14 @@ export function registerRefineTool(pi: ExtensionAPI, state: PlanState): void {
       const models = [state.config.plannerModel, ...state.config.fallbackModels].filter(Boolean);
       let lastErr: Error | null = null;
 
-      const task = assembleRefineTask(params);
+      const relPath = planFilePath(ctx.cwd);
+      const task = assembleRefineTask(params, relPath);
 
       for (const model of models) {
         try {
           const result = await runSubagent(
             model,
-            refinerSystemPrompt(state.currentPlan, params.sliceId),
+            refinerSystemPrompt(params.sliceId, slice.title, relPath),
             task,
             "read,grep,find,ls,bash",
             signal,
@@ -65,7 +66,7 @@ export function registerRefineTool(pi: ExtensionAPI, state: PlanState): void {
           const parsed = extractRefineJson(text);
           if (parsed) {
             applyRefinement(state, params.sliceId, parsed);
-            persist(pi, state);
+            persist(pi, state, ctx.cwd);
           }
 
           return result;
@@ -82,33 +83,19 @@ export function registerRefineTool(pi: ExtensionAPI, state: PlanState): void {
   });
 }
 
-function assembleRefineTask(params: RefineParamsT): string {
+function assembleRefineTask(params: RefineParamsT, planFileRelPath: string): string {
   let task = `Deep-dive into slice ${params.sliceId}.`;
 
   if (params.instructions) task += `\n\n## Focus\n${params.instructions}`;
 
-  if (params.reads?.length) {
-    task += `\n\n## Read these files first\n${params.reads.map((path) => `- ${path}`).join("\n")}`;
-  }
+  const reads = [planFileRelPath, ...(params.reads ?? [])];
+  task += `\n\n## Read these files first\n${reads.map((path) => `- ${path}`).join("\n")}`;
 
   return task;
 }
 
 export function extractRefineJson(text: string): Record<string, unknown> | null {
-  const jsonBlocks = [...text.matchAll(/```json\s*\n([\s\S]*?)```/g)];
-  if (jsonBlocks.length === 0) return null;
-
-  const lastBlock = jsonBlocks[jsonBlocks.length - 1][1];
-  try {
-    const parsed = JSON.parse(lastBlock) as Record<string, unknown>;
-    if (typeof parsed === "object" && parsed !== null && "sliceId" in parsed) {
-      return parsed;
-    }
-  } catch {
-    // JSON parse failed
-  }
-
-  return null;
+  return extractJsonBlock(text, "sliceId");
 }
 
 function applyRefinement(
@@ -135,19 +122,9 @@ function applyRefinement(
     status: "refined",
   };
 
-  state.currentPlan.updatedAt = new Date().toISOString();
-}
-
-function toTask(raw: unknown): PlanTask {
-  if (typeof raw !== "object" || raw === null) {
-    return { description: "", files: [], details: "" };
+  if (state.currentPlan.status === "drafting") {
+    state.currentPlan.status = "refining";
   }
-  const obj = raw as Record<string, unknown>;
-  return {
-    description: typeof obj.description === "string" ? obj.description : "",
-    files: Array.isArray(obj.files)
-      ? obj.files.filter((f): f is string => typeof f === "string")
-      : [],
-    details: typeof obj.details === "string" ? obj.details : "",
-  };
+
+  state.currentPlan.updatedAt = new Date().toISOString();
 }
