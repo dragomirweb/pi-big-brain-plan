@@ -91,7 +91,7 @@ describe("persist", () => {
         },
       } as Parameters<typeof persist>[0];
       const plan = makePlan();
-      const state: PlanState = { currentPlan: plan, config: baseConfig };
+      const state: PlanState = { currentPlan: plan, config: baseConfig, planActive: true };
 
       persist(pi, state, cwd);
 
@@ -102,7 +102,7 @@ describe("persist", () => {
       expect(entries.at(-1)).toEqual({
         type: "custom",
         customType: PERSIST_KEY,
-        data: { v: 2, config: baseConfig },
+        data: { v: 2, config: baseConfig, planActive: true },
       });
       expect(JSON.stringify(entries.at(-1)?.data)).not.toContain("slices");
     });
@@ -116,7 +116,7 @@ describe("persist", () => {
           entries.push({ type: "custom", customType, data });
         },
       } as Parameters<typeof persist>[0];
-      const state: PlanState = { currentPlan: makePlan(), config: baseConfig };
+      const state: PlanState = { currentPlan: makePlan(), config: baseConfig, planActive: false };
 
       persist(pi, state, cwd);
       state.currentPlan = null;
@@ -124,7 +124,7 @@ describe("persist", () => {
 
       expect(existsSync(join(cwd, CONFIG_DIR_NAME, PLAN_DIR, PLAN_FILE))).toBe(false);
       expect(existsSync(join(cwd, CONFIG_DIR_NAME, PLAN_DIR, PLAN_EXPORT_FILE))).toBe(false);
-      expect(entries.at(-1)?.data).toEqual({ v: 2, config: baseConfig });
+      expect(entries.at(-1)?.data).toEqual({ v: 2, config: baseConfig, planActive: false });
     });
   });
 });
@@ -153,6 +153,7 @@ describe("loadLatest", () => {
       expect(loadLatest(makeSessionManager(entries), cwd)).toEqual({
         plan: latest.plan,
         config: latest.config,
+        planActive: false,
       });
     });
   });
@@ -168,6 +169,7 @@ describe("loadLatest", () => {
       expect(loadLatest(makeSessionManager([entry({ v: 2, config })]), cwd)).toEqual({
         plan,
         config,
+        planActive: false,
       });
     });
   });
@@ -176,9 +178,12 @@ describe("loadLatest", () => {
     withTempCwd((cwd) => {
       const config = { plannerModel: "google/gemini-2", fallbackModels: [] };
 
-      expect(loadLatest(makeSessionManager([entry({ v: 2, config })]), cwd)).toEqual({
+      expect(
+        loadLatest(makeSessionManager([entry({ v: 2, config, planActive: true })]), cwd),
+      ).toEqual({
         plan: null,
         config,
+        planActive: true,
       });
     });
   });
@@ -191,6 +196,7 @@ describe("loadLatest", () => {
       expect(loadLatest(makeSessionManager(entries), cwd)).toEqual({
         plan: valid.plan,
         config: valid.config,
+        planActive: false,
       });
     });
   });
@@ -203,6 +209,7 @@ describe("loadLatest", () => {
       expect(loadLatest(makeSessionManager(entries), cwd)).toEqual({
         plan: valid.plan,
         config: valid.config,
+        planActive: false,
       });
     });
   });
@@ -215,6 +222,7 @@ describe("loadLatest", () => {
       expect(loadLatest(makeSessionManager(entries), cwd)).toEqual({
         plan: valid.plan,
         config: valid.config,
+        planActive: false,
       });
     });
   });
