@@ -251,7 +251,7 @@ ${planStatus}`;
 // ---------- Command UI messages ----------
 
 export function planUsage(): string {
-  return "Usage: /plan on | off | status | export | reset | model <model-id> | fallback <id[,id]|none> | slice <id> | help";
+  return "Usage: /plan (settings menu) | on | off | status | export | reset | model <id> | fallback <id[,id]|none> | slice <id> | help";
 }
 
 export function planStatus(state: PlanState): string {

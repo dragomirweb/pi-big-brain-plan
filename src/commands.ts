@@ -45,11 +45,12 @@ function resolveModel(registry: ModelRegistry, idStr: string): Model | undefined
 export function registerPlanCommand(pi: ExtensionAPI, state: PlanState): void {
   pi.registerCommand("plan", {
     description:
-      "Implementation Spec Planner: /plan on|off|status|export|reset|slice <id>|model <id>|help",
+      "Implementation Spec Planner: /plan (settings menu) | on | off | status | export | reset | help",
     getArgumentCompletions: (prefix: string) => {
       const verbs = [
         "on",
         "off",
+        "settings",
         "status",
         "export",
         "reset",
@@ -100,7 +101,12 @@ export function registerPlanCommand(pi: ExtensionAPI, state: PlanState): void {
         return;
       }
 
-      if (verb === "" || verb === "status") {
+      if (verb === "" || verb === "settings") {
+        await showPlanSettings(pi, state, ctx);
+        return;
+      }
+
+      if (verb === "status") {
         const modeLabel = state.planActive ? "🧠 Plan mode: ON" : "Plan mode: OFF";
         ctx.ui.notify(`${modeLabel}\n${msg.planStatus(state)}`, "info");
         return;
@@ -194,4 +200,151 @@ export function registerPlanCommand(pi: ExtensionAPI, state: PlanState): void {
       ctx.ui.notify(msg.planUsage(), "warning");
     },
   });
+}
+
+// ---------- Interactive settings menu ----------
+
+async function showPlanSettings(
+  pi: ExtensionAPI,
+  state: PlanState,
+  ctx: ExtensionCommandContext,
+): Promise<void> {
+  const modeIcon = state.planActive ? "✅" : "⚪";
+  const planSummary = state.currentPlan
+    ? `${state.currentPlan.title} (${state.currentPlan.slices.length} slices)`
+    : "none";
+
+  const choice = await ctx.ui.select(
+    "🧠 Plan Settings",
+    [
+      `${modeIcon} Plan mode: ${state.planActive ? "ON" : "OFF"}  — toggle`,
+      `🤖 Model: ${state.config.plannerModel}  — change`,
+      `🔄 Fallback: ${state.config.fallbackModels.length > 0 ? state.config.fallbackModels.join(", ") : "none"}  — change`,
+      `📋 Plan: ${planSummary}`,
+      state.currentPlan ? "📤 Export plan" : "",
+      state.currentPlan ? "🗑️  Reset plan" : "",
+    ].filter(Boolean),
+  );
+
+  if (!choice) return;
+
+  // Toggle plan mode
+  if (choice.includes("Plan mode")) {
+    state.planActive = !state.planActive;
+    applyPlanTools(pi, state.planActive);
+    persist(pi, state, ctx.cwd);
+    ctx.ui.notify(
+      state.planActive
+        ? `🧠 Plan mode ON — ${PLAN_TOOL} and ${REFINE_TOOL} tools are now active.`
+        : "Plan mode OFF — planning tools deactivated.",
+      "info",
+    );
+    return;
+  }
+
+  // Change model
+  if (choice.includes("Model")) {
+    await showModelPicker(pi, state, ctx);
+    return;
+  }
+
+  // Change fallback
+  if (choice.includes("Fallback")) {
+    await showFallbackPicker(pi, state, ctx);
+    return;
+  }
+
+  // Export plan
+  if (choice.includes("Export")) {
+    if (!state.currentPlan) return;
+    const markdown = formatSpecMarkdown(state.currentPlan);
+    ctx.ui.notify(
+      `${markdown}\n\n---\n📄 Plan files: \`${CONFIG_DIR_NAME}/${PLAN_DIR}/${PLAN_FILE}\` and \`${CONFIG_DIR_NAME}/${PLAN_DIR}/${PLAN_EXPORT_FILE}\``,
+      "info",
+    );
+    return;
+  }
+
+  // Reset plan
+  if (choice.includes("Reset")) {
+    const confirmed = await ctx.ui.confirm(
+      "Reset plan",
+      "Are you sure you want to clear the current plan? This cannot be undone.",
+    );
+    if (!confirmed) return;
+    state.currentPlan = null;
+    persist(pi, state, ctx.cwd);
+    ctx.ui.notify(msg.planReset(), "info");
+    return;
+  }
+}
+
+async function showModelPicker(
+  pi: ExtensionAPI,
+  state: PlanState,
+  ctx: ExtensionCommandContext,
+): Promise<void> {
+  const available = ctx.modelRegistry.getAvailable();
+  const options = available.map((m) => {
+    const id = canonicalModelId(m);
+    const current = id === state.config.plannerModel ? " ← current" : "";
+    return `${id}${current}`;
+  });
+
+  if (options.length === 0) {
+    ctx.ui.notify("No models available. Check your API keys.", "error");
+    return;
+  }
+
+  const choice = await ctx.ui.select("🤖 Select planner model", options);
+  if (!choice) return;
+
+  const modelId = choice.replace(" ← current", "");
+  state.config.plannerModel = modelId;
+  persist(pi, state, ctx.cwd);
+  ctx.ui.notify(msg.planModelSet(state), "info");
+}
+
+async function showFallbackPicker(
+  pi: ExtensionAPI,
+  state: PlanState,
+  ctx: ExtensionCommandContext,
+): Promise<void> {
+  const available = ctx.modelRegistry.getAvailable();
+  const options = available
+    .map((m) => canonicalModelId(m))
+    .filter((id) => id !== state.config.plannerModel);
+
+  const menuOptions = [
+    "Clear all fallbacks",
+    ...options.map((id) => {
+      const isFallback = state.config.fallbackModels.includes(id);
+      return `${isFallback ? "✅" : "⚪"} ${id}`;
+    }),
+  ];
+
+  const choice = await ctx.ui.select("🔄 Select fallback model", menuOptions);
+  if (!choice) return;
+
+  if (choice === "Clear all fallbacks") {
+    state.config.fallbackModels = [];
+    persist(pi, state, ctx.cwd);
+    ctx.ui.notify("Fallback models cleared.", "info");
+    return;
+  }
+
+  // Toggle the selected model in the fallback list
+  const modelId = choice.replace(/^[✅⚪] /, "");
+  if (state.config.fallbackModels.includes(modelId)) {
+    state.config.fallbackModels = state.config.fallbackModels.filter((id) => id !== modelId);
+  } else {
+    state.config.fallbackModels.push(modelId);
+  }
+  persist(pi, state, ctx.cwd);
+  ctx.ui.notify(
+    state.config.fallbackModels.length > 0
+      ? `Fallback models: ${state.config.fallbackModels.join(", ")}`
+      : "No fallback models configured.",
+    "info",
+  );
 }
