@@ -1,3 +1,6 @@
+import { mkdtempSync, rmSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { describe, expect, it } from "vitest";
 
 import { registerPlanCommand } from "../src/commands.ts";
@@ -44,7 +47,42 @@ function getCommand(commands: Map<string, unknown>, name: string) {
   return cmd as { handler: (args: string, ctx: unknown) => Promise<void> };
 }
 
+async function withTempCwd(fn: (cwd: string) => Promise<void>): Promise<void> {
+  const cwd = mkdtempSync(join(tmpdir(), "pi-big-brain-plan-"));
+  try {
+    await fn(cwd);
+  } finally {
+    rmSync(cwd, { recursive: true, force: true });
+  }
+}
+
 describe("/plan command", () => {
+  it("provides argument completions for verbs", () => {
+    const { pi, commands } = makeMockPi();
+    const state = createPlanState(baseConfig);
+    registerPlanCommand(pi, state);
+
+    const cmd = getCommand(commands, "plan") as {
+      getArgumentCompletions?: (prefix: string) => unknown;
+    };
+    expect(cmd.getArgumentCompletions).toBeDefined();
+    const completions = cmd.getArgumentCompletions?.("st");
+    expect(completions).toEqual([{ value: "status", label: "status" }]);
+  });
+
+  it("provides slice id completions when plan exists", () => {
+    const { pi, commands } = makeMockPi();
+    const state = createPlanState(baseConfig);
+    state.currentPlan = makePlan();
+    registerPlanCommand(pi, state);
+
+    const cmd = getCommand(commands, "plan") as {
+      getArgumentCompletions?: (prefix: string) => unknown;
+    };
+    const completions = cmd.getArgumentCompletions?.("slice s");
+    expect(completions).toEqual([{ value: "slice s1", label: "slice s1" }]);
+  });
+
   it("status with no plan shows empty message", async () => {
     const { pi, ctx, commands, notifications } = makeMockPi();
     const state = createPlanState(baseConfig);
@@ -70,16 +108,18 @@ describe("/plan command", () => {
   });
 
   it("reset clears the plan and persists", async () => {
-    const { pi, ctx, commands, entries } = makeMockPi();
-    const state = createPlanState(baseConfig);
-    state.currentPlan = makePlan();
-    registerPlanCommand(pi, state);
+    await withTempCwd(async (cwd) => {
+      const { pi, ctx, commands, entries } = makeMockPi({ cwd });
+      const state = createPlanState(baseConfig);
+      state.currentPlan = makePlan();
+      registerPlanCommand(pi, state);
 
-    const cmd = getCommand(commands, "plan");
-    await cmd.handler("reset", ctx);
+      const cmd = getCommand(commands, "plan");
+      await cmd.handler("reset", ctx);
 
-    expect(state.currentPlan).toBeNull();
-    expect(entries.at(-1)).toMatchObject({ customType: PERSIST_KEY });
+      expect(state.currentPlan).toBeNull();
+      expect(entries.at(-1)).toMatchObject({ customType: PERSIST_KEY });
+    });
   });
 
   it("export with no plan warns", async () => {
@@ -104,6 +144,7 @@ describe("/plan command", () => {
 
     expect(notifications[0].msg).toContain("# Test Plan");
     expect(notifications[0].msg).toContain("Slice s1");
+    expect(notifications[0].msg).toContain("Plan files");
   });
 
   it("slice shows detail for a valid ID", async () => {
@@ -131,15 +172,17 @@ describe("/plan command", () => {
   });
 
   it("model sets the planner model", async () => {
-    const { pi, ctx, commands, notifications } = makeMockPi();
-    const state = createPlanState(baseConfig);
-    registerPlanCommand(pi, state);
+    await withTempCwd(async (cwd) => {
+      const { pi, ctx, commands, notifications } = makeMockPi({ cwd });
+      const state = createPlanState(baseConfig);
+      registerPlanCommand(pi, state);
 
-    const cmd = getCommand(commands, "plan");
-    await cmd.handler("model anthropic/claude-sonnet-4", ctx);
+      const cmd = getCommand(commands, "plan");
+      await cmd.handler("model anthropic/claude-sonnet-4", ctx);
 
-    expect(state.config.plannerModel).toBe("anthropic/claude-sonnet-4");
-    expect(notifications[0].type).toBe("info");
+      expect(state.config.plannerModel).toBe("anthropic/claude-sonnet-4");
+      expect(notifications[0].type).toBe("info");
+    });
   });
 
   it("unknown verb shows usage", async () => {
