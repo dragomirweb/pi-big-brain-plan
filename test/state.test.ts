@@ -10,6 +10,7 @@ describe("plan state", () => {
     });
     expect(state.currentPlan).toBeNull();
     expect(state.config.plannerModel).toBe("anthropic/claude-sonnet-4");
+    expect(state.planActive).toBe(false);
   });
 
   it("generatePlanId produces prefixed IDs", () => {
