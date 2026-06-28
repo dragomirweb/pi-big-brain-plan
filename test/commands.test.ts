@@ -4,7 +4,7 @@ import { join } from "node:path";
 import { describe, expect, it } from "vitest";
 
 import { registerPlanCommand } from "../src/commands.ts";
-import { PERSIST_KEY, type Plan, createPlanState } from "../src/state.ts";
+import { PERSIST_KEY, PLAN_TOOL, type Plan, REFINE_TOOL, createPlanState } from "../src/state.ts";
 import { makeMockPi } from "./helpers/mock-pi.ts";
 
 const baseConfig = {
@@ -68,6 +68,10 @@ describe("/plan command", () => {
     expect(cmd.getArgumentCompletions).toBeDefined();
     const completions = cmd.getArgumentCompletions?.("st");
     expect(completions).toEqual([{ value: "status", label: "status" }]);
+    expect(cmd.getArgumentCompletions?.("o")).toEqual([
+      { value: "on", label: "on" },
+      { value: "off", label: "off" },
+    ]);
   });
 
   it("provides slice id completions when plan exists", () => {
@@ -91,20 +95,69 @@ describe("/plan command", () => {
     const cmd = getCommand(commands, "plan");
     await cmd.handler("status", ctx);
 
+    expect(notifications[0].msg).toContain("Plan mode: OFF");
     expect(notifications[0].msg).toMatch(/no active plan/i);
+    expect(notifications[0].msg).toContain("/plan on");
   });
 
   it("status with an active plan shows slice list", async () => {
     const { pi, ctx, commands, notifications } = makeMockPi();
     const state = createPlanState(baseConfig);
+    state.planActive = true;
     state.currentPlan = makePlan();
     registerPlanCommand(pi, state);
 
     const cmd = getCommand(commands, "plan");
     await cmd.handler("status", ctx);
 
+    expect(notifications[0].msg).toContain("Plan mode: ON");
     expect(notifications[0].msg).toContain("Test Plan");
     expect(notifications[0].msg).toContain("s1");
+  });
+
+  it("on activates plan mode tools and persists", async () => {
+    await withTempCwd(async (cwd) => {
+      const { pi, ctx, commands, entries, notifications, activeTools } = makeMockPi({
+        cwd,
+        activeTools: ["read", PLAN_TOOL],
+      });
+      const state = createPlanState(baseConfig);
+      registerPlanCommand(pi, state);
+
+      const cmd = getCommand(commands, "plan");
+      await cmd.handler("on", ctx);
+
+      expect(state.planActive).toBe(true);
+      expect(activeTools).toEqual(["read", PLAN_TOOL, REFINE_TOOL]);
+      expect(entries.at(-1)).toMatchObject({
+        customType: PERSIST_KEY,
+        data: { v: 2, config: baseConfig, planActive: true },
+      });
+      expect(notifications[0].msg).toContain("Plan mode ON");
+    });
+  });
+
+  it("off deactivates plan mode tools and persists", async () => {
+    await withTempCwd(async (cwd) => {
+      const { pi, ctx, commands, entries, notifications, activeTools } = makeMockPi({
+        cwd,
+        activeTools: ["read", PLAN_TOOL, REFINE_TOOL],
+      });
+      const state = createPlanState(baseConfig);
+      state.planActive = true;
+      registerPlanCommand(pi, state);
+
+      const cmd = getCommand(commands, "plan");
+      await cmd.handler("off", ctx);
+
+      expect(state.planActive).toBe(false);
+      expect(activeTools).toEqual(["read"]);
+      expect(entries.at(-1)).toMatchObject({
+        customType: PERSIST_KEY,
+        data: { v: 2, config: baseConfig, planActive: false },
+      });
+      expect(notifications[0].msg).toContain("Plan mode OFF");
+    });
   });
 
   it("reset clears the plan and persists", async () => {
