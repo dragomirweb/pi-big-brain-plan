@@ -14,6 +14,7 @@ interface MockPiOptions {
 }
 
 interface MockEntry {
+  type: "custom";
   customType: string;
   data: unknown;
 }
@@ -61,7 +62,7 @@ export function makeMockPi(opts?: MockPiOptions) {
 
   const pi = {
     appendEntry: (customType: string, data: unknown) => {
-      entries.push({ customType, data });
+      entries.push({ type: "custom", customType, data });
     },
     registerCommand: (name: string, def: CommandDefinition) => {
       commands.set(name, def);
