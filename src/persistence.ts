@@ -46,7 +46,7 @@ export function persist(pi: ExtensionAPI, state: PlanState, cwd: string): void {
   }
 
   // Lightweight session entry (config only, no plan data)
-  const entry: PlanEntryV2 = { v: 2, config: state.config };
+  const entry: PlanEntryV2 = { v: 2, config: state.config, planActive: state.planActive };
   pi.appendEntry(PERSIST_KEY, entry);
 }
 
@@ -67,13 +67,13 @@ export function loadLatest(
     if (data?.v === 2) {
       const v2 = data as PlanEntryV2;
       const plan = loadPlanFromDisk(cwd);
-      return { plan, config: v2.config };
+      return { plan, config: v2.config, planActive: v2.planActive ?? false };
     }
 
     // v1: inline plan data (backward compat — auto-migrates on next persist)
     if (data?.v === 1) {
       const v1 = data as PlanPersisted;
-      return { plan: v1.plan, config: v1.config };
+      return { plan: v1.plan, config: v1.config, planActive: false };
     }
   }
 
