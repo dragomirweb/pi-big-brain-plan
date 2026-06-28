@@ -5,10 +5,18 @@ import {
   type ExtensionContext,
 } from "@earendil-works/pi-coding-agent";
 
+import { applyPlanTools } from "./events.ts";
 import { persist } from "./persistence.ts";
 import * as msg from "./prompts.ts";
 import { formatSliceDetail, formatSpecMarkdown } from "./spec-formatter.ts";
-import { PLAN_DIR, PLAN_EXPORT_FILE, PLAN_FILE, type PlanState } from "./state.ts";
+import {
+  PLAN_DIR,
+  PLAN_EXPORT_FILE,
+  PLAN_FILE,
+  PLAN_TOOL,
+  type PlanState,
+  REFINE_TOOL,
+} from "./state.ts";
 
 type ModelRegistry = ExtensionContext["modelRegistry"];
 type Model = NonNullable<ExtensionContext["model"]>;
@@ -37,9 +45,19 @@ function resolveModel(registry: ModelRegistry, idStr: string): Model | undefined
 export function registerPlanCommand(pi: ExtensionAPI, state: PlanState): void {
   pi.registerCommand("plan", {
     description:
-      "Implementation Spec Planner: /plan status|export|reset|slice <id>|model <id>|help",
+      "Implementation Spec Planner: /plan on|off|status|export|reset|slice <id>|model <id>|help",
     getArgumentCompletions: (prefix: string) => {
-      const verbs = ["status", "export", "reset", "slice", "model", "fallback", "help"];
+      const verbs = [
+        "on",
+        "off",
+        "status",
+        "export",
+        "reset",
+        "slice",
+        "model",
+        "fallback",
+        "help",
+      ];
       const trimmed = prefix.trim();
 
       const spaceIdx = trimmed.indexOf(" ");
@@ -63,8 +81,28 @@ export function registerPlanCommand(pi: ExtensionAPI, state: PlanState): void {
       const verb = (spaceIndex === -1 ? text : text.slice(0, spaceIndex)).toLowerCase();
       const value = spaceIndex === -1 ? "" : text.slice(spaceIndex).trim();
 
+      if (verb === "on") {
+        state.planActive = true;
+        applyPlanTools(pi, true);
+        persist(pi, state, ctx.cwd);
+        ctx.ui.notify(
+          `🧠 Plan mode ON — ${PLAN_TOOL} and ${REFINE_TOOL} tools are now active.`,
+          "info",
+        );
+        return;
+      }
+
+      if (verb === "off") {
+        state.planActive = false;
+        applyPlanTools(pi, false);
+        persist(pi, state, ctx.cwd);
+        ctx.ui.notify("Plan mode OFF — planning tools deactivated.", "info");
+        return;
+      }
+
       if (verb === "" || verb === "status") {
-        ctx.ui.notify(msg.planStatus(state), "info");
+        const modeLabel = state.planActive ? "🧠 Plan mode: ON" : "Plan mode: OFF";
+        ctx.ui.notify(`${modeLabel}\n${msg.planStatus(state)}`, "info");
         return;
       }
 
