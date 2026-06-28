@@ -15,7 +15,7 @@ export function registerPlanEvents(pi: ExtensionAPI, state: PlanState): void {
   });
 
   pi.on("session_start", (_event: SessionStartEvent, ctx) => {
-    const saved = loadLatest(ctx.sessionManager);
+    const saved = loadLatest(ctx.sessionManager, ctx.cwd);
     if (saved) {
       state.currentPlan = saved.plan;
       state.config = resolveConfig(pi, saved.config);
