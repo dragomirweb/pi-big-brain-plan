@@ -106,6 +106,7 @@ export function runViaBridge(
   ctx: ExtensionContext,
   agentName: string,
   task: string,
+  model: string | undefined,
   signal: AbortSignal | undefined,
   onUpdate: AgentToolUpdateCallback<PlannerDetails> | undefined,
 ): Promise<AgentToolResult<PlannerDetails> | null> {
@@ -195,7 +196,12 @@ export function runViaBridge(
 
     pi.events.emit(SLASH_REQUEST_EVENT, {
       requestId,
-      params: { agent: agentName, task, context: "fresh" as const },
+      params: {
+        agent: agentName,
+        task,
+        context: "fresh" as const,
+        ...(model ? { model } : {}),
+      },
       ctx,
     });
   });

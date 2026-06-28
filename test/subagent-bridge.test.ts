@@ -71,6 +71,7 @@ describe("runViaBridge", () => {
       "Plan something",
       undefined,
       undefined,
+      undefined,
     );
 
     // The bridge emits a request
@@ -95,6 +96,7 @@ describe("runViaBridge", () => {
       mockCtx,
       "big-brain-planner",
       "Plan something",
+      undefined,
       undefined,
       undefined,
     );
@@ -150,6 +152,7 @@ describe("runViaBridge", () => {
       "Refine slice s1",
       undefined,
       undefined,
+      undefined,
     );
 
     const requestCall = mockPi.events.emit.mock.calls.find(
@@ -178,6 +181,7 @@ describe("runViaBridge", () => {
       mockCtx,
       "big-brain-planner",
       "Plan something",
+      undefined,
       undefined,
       onUpdate,
     );
@@ -220,6 +224,7 @@ describe("runViaBridge", () => {
       mockCtx,
       "big-brain-planner",
       "Plan something",
+      undefined,
       controller.signal,
       undefined,
     );

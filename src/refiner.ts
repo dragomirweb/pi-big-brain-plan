@@ -92,6 +92,7 @@ async function runRefinerWithBridge(
     ctx,
     "big-brain-refiner",
     bridgeTask,
+    state.config.plannerModel,
     signal,
     onUpdate,
   );

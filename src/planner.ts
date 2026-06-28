@@ -83,6 +83,7 @@ async function runPlannerWithBridge(
     ctx,
     "big-brain-planner",
     bridgeTask,
+    state.config.plannerModel,
     signal,
     onUpdate,
   );
