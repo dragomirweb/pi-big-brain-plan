@@ -6,15 +6,16 @@ import type {
 } from "@earendil-works/pi-coding-agent";
 import type { Static } from "typebox";
 
-import { persist } from "./persistence.ts";
+import { persist, planFilePath } from "./persistence.ts";
 import { PlanParams, planToolDescription, plannerSystemPrompt } from "./prompts.ts";
 import {
   PLAN_TOOL,
   type Plan,
   type PlanSlice,
   type PlanState,
-  type PlanTask,
+  extractJsonBlock,
   generatePlanId,
+  toTask,
 } from "./state.ts";
 import { type PlannerDetails, isModelUnavailable, runSubagent, toError } from "./subagent.ts";
 
@@ -28,6 +29,7 @@ export function registerPlanTool(pi: ExtensionAPI, state: PlanState): void {
     parameters: PlanParams,
     promptSnippet:
       "big_brain_plan — create or iterate on an implementation spec, breaking a problem into ordered vertical slices.",
+    executionMode: "sequential",
     execute: async (
       _toolCallId: string,
       params: PlanParamsT,
@@ -38,13 +40,14 @@ export function registerPlanTool(pi: ExtensionAPI, state: PlanState): void {
       const models = [state.config.plannerModel, ...state.config.fallbackModels].filter(Boolean);
       let lastErr: Error | null = null;
 
-      const task = assembleTask(params, state.currentPlan);
+      const relPath = planFilePath(ctx.cwd);
+      const task = assembleTask(params, state.currentPlan, relPath);
 
       for (const model of models) {
         try {
           const result = await runSubagent(
             model,
-            plannerSystemPrompt(params.feedback ? state.currentPlan : null, params.feedback),
+            plannerSystemPrompt(!!state.currentPlan && !!params.feedback, params.feedback, relPath),
             task,
             "read,grep,find,ls,bash",
             signal,
@@ -61,7 +64,7 @@ export function registerPlanTool(pi: ExtensionAPI, state: PlanState): void {
           if (parsed) {
             const plan = toPlan(parsed, params.problem, state.currentPlan);
             state.currentPlan = plan;
-            persist(pi, state);
+            persist(pi, state, ctx.cwd);
           }
 
           return result;
@@ -78,7 +81,11 @@ export function registerPlanTool(pi: ExtensionAPI, state: PlanState): void {
   });
 }
 
-function assembleTask(params: PlanParamsT, existingPlan: Plan | null): string {
+function assembleTask(
+  params: PlanParamsT,
+  existingPlan: Plan | null,
+  planFileRelPath: string,
+): string {
   let task = `Plan an implementation for:\n\n${params.problem}`;
 
   if (params.context) task += `\n\n## Context\n${params.context}`;
@@ -87,28 +94,20 @@ function assembleTask(params: PlanParamsT, existingPlan: Plan | null): string {
     task += `\n\n## Feedback on current plan\n${params.feedback}`;
   }
 
-  if (params.reads?.length) {
-    task += `\n\n## Read these files first for context\n${params.reads.map((path) => `- ${path}`).join("\n")}`;
+  // Prepend plan file to reads when refining
+  const reads = [
+    ...(existingPlan && params.feedback ? [planFileRelPath] : []),
+    ...(params.reads ?? []),
+  ];
+  if (reads.length) {
+    task += `\n\n## Read these files first for context\n${reads.map((path) => `- ${path}`).join("\n")}`;
   }
 
   return task;
 }
 
 export function extractPlanJson(text: string): Record<string, unknown> | null {
-  const jsonBlocks = [...text.matchAll(/```json\s*\n([\s\S]*?)```/g)];
-  if (jsonBlocks.length === 0) return null;
-
-  const lastBlock = jsonBlocks[jsonBlocks.length - 1][1];
-  try {
-    const parsed = JSON.parse(lastBlock) as Record<string, unknown>;
-    if (typeof parsed === "object" && parsed !== null && "slices" in parsed) {
-      return parsed;
-    }
-  } catch {
-    // JSON parse failed
-  }
-
-  return null;
+  return extractJsonBlock(text, "slices");
 }
 
 function toPlan(
@@ -129,7 +128,7 @@ function toPlan(
     openQuestions: Array.isArray(raw.openQuestions)
       ? raw.openQuestions.filter((q): q is string => typeof q === "string")
       : [],
-    status: "drafting",
+    status: existing ? "refining" : "drafting",
     iterations: (existing?.iterations ?? 0) + 1,
     createdAt: existing?.createdAt ?? now,
     updatedAt: now,
@@ -155,20 +154,6 @@ function toSlice(raw: unknown): PlanSlice {
     status: "draft",
     notes: typeof obj.notes === "string" ? obj.notes : "",
     order: typeof obj.order === "number" ? obj.order : 0,
-  };
-}
-
-function toTask(raw: unknown): PlanTask {
-  if (typeof raw !== "object" || raw === null) {
-    return { description: "", files: [], details: "" };
-  }
-  const obj = raw as Record<string, unknown>;
-  return {
-    description: typeof obj.description === "string" ? obj.description : "",
-    files: Array.isArray(obj.files)
-      ? obj.files.filter((f): f is string => typeof f === "string")
-      : [],
-    details: typeof obj.details === "string" ? obj.details : "",
   };
 }
 
