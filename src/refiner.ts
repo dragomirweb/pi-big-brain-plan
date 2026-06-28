@@ -9,6 +9,7 @@ import type { Static } from "typebox";
 import { persist, planFilePath } from "./persistence.ts";
 import { RefineParams, refineToolDescription, refinerSystemPrompt } from "./prompts.ts";
 import { type PlanState, REFINE_TOOL, extractJsonBlock, toTask } from "./state.ts";
+import { buildBridgeTask, runViaBridge } from "./subagent-bridge.ts";
 import { type PlannerDetails, isModelUnavailable, runSubagent, toError } from "./subagent.ts";
 
 type RefineParamsT = Static<typeof RefineParams>;
@@ -40,50 +41,90 @@ export function registerRefineTool(pi: ExtensionAPI, state: PlanState): void {
         );
       }
 
-      const models = [state.config.plannerModel, ...state.config.fallbackModels].filter(Boolean);
-      let lastErr: Error | null = null;
-
       const relPath = planFilePath(ctx.cwd);
-      const task = assembleRefineTask(params, relPath);
+      const result = await runRefinerWithBridge(
+        pi,
+        state,
+        params,
+        slice.title,
+        relPath,
+        signal,
+        onUpdate,
+        ctx,
+      );
 
-      for (const model of models) {
-        try {
-          const result = await runSubagent(
-            model,
-            refinerSystemPrompt(params.sliceId, slice.title, relPath),
-            task,
-            "read,grep,find,ls,bash",
-            signal,
-            onUpdate,
-            ctx.cwd,
-          );
+      const text =
+        result.content?.[0]?.type === "text" ? (result.content[0] as { text: string }).text : "";
 
-          const text =
-            result.content?.[0]?.type === "text"
-              ? (result.content[0] as { text: string }).text
-              : "";
-
-          const parsed = extractRefineJson(text);
-          if (parsed) {
-            applyRefinement(state, params.sliceId, parsed);
-            persist(pi, state, ctx.cwd);
-          }
-
-          return result;
-        } catch (err) {
-          lastErr = toError(err);
-          if (!isModelUnavailable(lastErr)) throw lastErr;
-        }
+      const parsed = extractRefineJson(text);
+      if (parsed) {
+        applyRefinement(state, params.sliceId, parsed);
+        persist(pi, state, ctx.cwd);
       }
 
-      throw new Error(
-        `refine_slice failed for all models [${models.join(", ")}]: ${lastErr?.message ?? "unknown"}`,
-      );
+      return result;
     },
   });
 }
 
-function assembleRefineTask(params: RefineParamsT, planFileRelPath: string): string {
+async function runRefinerWithBridge(
+  pi: ExtensionAPI,
+  state: PlanState,
+  params: RefineParamsT,
+  sliceTitle: string,
+  planFileRelPath: string,
+  signal: AbortSignal | undefined,
+  onUpdate: AgentToolUpdateCallback<PlannerDetails> | undefined,
+  ctx: ExtensionContext,
+): Promise<AgentToolResult<PlannerDetails>> {
+  const taskBody = `Deep-dive into slice ${params.sliceId}.${
+    params.instructions ? `\n\n## Focus\n${params.instructions}` : ""
+  }`;
+
+  const dynamicContext =
+    `## Full plan context\nRead the plan at \`${planFileRelPath}\` for full context.\n\n` +
+    `## Slice to refine: ${params.sliceId} — ${sliceTitle}\nAfter reading the plan, focus your analysis on this slice.`;
+
+  const reads = [planFileRelPath, ...(params.reads ?? [])];
+  const bridgeTask = buildBridgeTask(taskBody, dynamicContext, reads);
+  const bridgeResult = await runViaBridge(
+    pi,
+    ctx,
+    "big-brain-refiner",
+    bridgeTask,
+    signal,
+    onUpdate,
+  );
+  if (bridgeResult) return bridgeResult;
+
+  // Fallback: use our own process spawner
+  const fallbackTask = assembleFallbackRefineTask(params, planFileRelPath);
+  const models = [state.config.plannerModel, ...state.config.fallbackModels].filter(Boolean);
+  let lastErr: Error | null = null;
+
+  for (const model of models) {
+    try {
+      return await runSubagent(
+        model,
+        refinerSystemPrompt(params.sliceId, sliceTitle, planFileRelPath),
+        fallbackTask,
+        "read,grep,find,ls,bash",
+        signal,
+        onUpdate,
+        ctx.cwd,
+      );
+    } catch (err) {
+      lastErr = toError(err);
+      if (!isModelUnavailable(lastErr)) throw lastErr;
+    }
+  }
+
+  throw new Error(
+    `refine_slice failed for all models [${models.join(", ")}]: ${lastErr?.message ?? "unknown"}`,
+  );
+}
+
+function assembleFallbackRefineTask(params: RefineParamsT, planFileRelPath: string): string {
   let task = `Deep-dive into slice ${params.sliceId}.`;
 
   if (params.instructions) task += `\n\n## Focus\n${params.instructions}`;
