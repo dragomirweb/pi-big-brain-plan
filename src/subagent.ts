@@ -21,8 +21,6 @@ export type PlannerDetails = {
 
 type JsonObject = Record<string, unknown>;
 
-const SPAWN_TIMEOUT_MS = 300_000;
-
 export async function runSubagent(
   model: string,
   systemPromptText: string,
@@ -46,7 +44,6 @@ export async function runSubagent(
     const exitCode = await new Promise<number>((resolve, reject) => {
       let settled = false;
       let buffer = "";
-      let killTimer: ReturnType<typeof setTimeout> | undefined;
 
       const proc = spawn(command, args, {
         cwd,
@@ -54,6 +51,8 @@ export async function runSubagent(
         shell: false,
         stdio: ["ignore", "pipe", "pipe"],
       });
+
+      let killTimer: ReturnType<typeof setTimeout> | undefined;
 
       const killWorker = () => {
         try {
@@ -75,7 +74,6 @@ export async function runSubagent(
       };
 
       const cleanup = () => {
-        clearTimeout(timer);
         signal?.removeEventListener("abort", onAbort);
       };
 
@@ -120,15 +118,6 @@ export async function runSubagent(
           killWorker();
           reject(new Error("Planning aborted."));
         });
-
-      const timer = setTimeout(
-        () =>
-          finish(() => {
-            killWorker();
-            reject(new Error(`Planning timed out after ${SPAWN_TIMEOUT_MS}ms.`));
-          }),
-        SPAWN_TIMEOUT_MS,
-      );
 
       signal?.addEventListener("abort", onAbort, { once: true });
       if (signal?.aborted) onAbort();
