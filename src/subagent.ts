@@ -21,11 +21,7 @@ export type PlannerDetails = {
 
 type JsonObject = Record<string, unknown>;
 
-let spawnTimeoutMs = 300_000;
-
-export function setSpawnTimeoutMs(ms: number): void {
-  spawnTimeoutMs = ms;
-}
+const SPAWN_TIMEOUT_MS = 300_000;
 
 export async function runSubagent(
   model: string,
@@ -40,7 +36,7 @@ export async function runSubagent(
   const { command, args } = getPiInvocation(buildArgs(model, sysPromptFile, task, tools));
 
   const messages: JsonObject[] = [];
-  const toolEvents: JsonObject[] = [];
+  let sawToolEvent = false;
   const usage = emptyUsage();
   let stderr = "";
   let stopReason: string | undefined;
@@ -114,7 +110,7 @@ export async function runSubagent(
         }
 
         if (eventType === "tool_execution_start" || eventType === "tool_execution_end") {
-          toolEvents.push(event);
+          sawToolEvent = true;
           onUpdate?.(partialResult(renderProgress(event), usage));
         }
       };
@@ -129,9 +125,9 @@ export async function runSubagent(
         () =>
           finish(() => {
             killWorker();
-            reject(new Error(`Planning timed out after ${spawnTimeoutMs}ms.`));
+            reject(new Error(`Planning timed out after ${SPAWN_TIMEOUT_MS}ms.`));
           }),
-        spawnTimeoutMs,
+        SPAWN_TIMEOUT_MS,
       );
 
       signal?.addEventListener("abort", onAbort, { once: true });
@@ -167,7 +163,7 @@ export async function runSubagent(
     if (messages.length === 0 && isModelUnavailable(new Error(stderr))) {
       throw new Error(`model-unavailable: ${tail(stderr, 300)}`);
     }
-    if (messages.length === 0 && toolEvents.length === 0) {
+    if (messages.length === 0 && !sawToolEvent) {
       throw new Error(`Planner produced no output. ${tail(stderr, 300) || "(no stderr)"}`);
     }
 
