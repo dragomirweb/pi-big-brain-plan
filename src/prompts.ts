@@ -1,6 +1,7 @@
+import { CONFIG_DIR_NAME } from "@earendil-works/pi-coding-agent";
 import { Type } from "typebox";
 
-import type { Plan, PlanState } from "./state.ts";
+import { PLAN_DIR, PLAN_FILE, type PlanState } from "./state.ts";
 
 // ---------- Tool parameter schemas ----------
 
@@ -91,11 +92,12 @@ Use after \`big_brain_plan\` to drill into slices that need more detail.`;
 // ---------- Planner subagent system prompt ----------
 
 export function plannerSystemPrompt(
-  existingPlan: Plan | null,
+  hasExistingPlan: boolean,
   feedback: string | undefined,
+  planFileRelPath: string,
 ): string {
-  const existingPlanSection = existingPlan
-    ? `\n\n## Existing plan to refine\n\`\`\`json\n${JSON.stringify(existingPlan, null, 2)}\n\`\`\`\n\nThe user has provided feedback on this plan. Incorporate the feedback and produce an updated plan. Preserve slice IDs where slices remain conceptually the same. You may add, remove, reorder, or merge slices as needed.`
+  const existingPlanSection = hasExistingPlan
+    ? `\n\n## Existing plan to refine\nThe current plan is stored at \`${planFileRelPath}\`. Read it first.\nIncorporate the feedback and produce an updated plan. Preserve slice IDs where slices remain conceptually the same. You may add, remove, reorder, or merge slices as needed.`
     : "";
 
   const feedbackSection = feedback ? `\n\n## User feedback to incorporate\n${feedback}` : "";
@@ -169,25 +171,20 @@ Order is 1-indexed and reflects implementation sequence.${existingPlanSection}${
 
 // ---------- Refiner subagent system prompt ----------
 
-export function refinerSystemPrompt(plan: Plan, sliceId: string): string {
-  const slice = plan.slices.find((s) => s.id === sliceId);
-  if (!slice) {
-    return `No slice found with ID "${sliceId}". Available slices: ${plan.slices.map((s) => s.id).join(", ")}`;
-  }
-
+export function refinerSystemPrompt(
+  sliceId: string,
+  sliceTitle: string,
+  planFileRelPath: string,
+): string {
   return `You are an expert SOFTWARE ARCHITECT doing a DEEP DIVE on a single implementation
 slice. You have the full plan for context, but your job is to thoroughly analyze
 and refine ONE specific slice.
 
 ## Full plan context
-\\\`\\\`\\\`json
-${JSON.stringify(plan, null, 2)}
-\\\`\\\`\\\`
+Read the plan at \`${planFileRelPath}\` for full context.
 
-## Slice to refine: ${slice.id} — ${slice.title}
-\\\`\\\`\\\`json
-${JSON.stringify(slice, null, 2)}
-\\\`\\\`\\\`
+## Slice to refine: ${sliceId} — ${sliceTitle}
+After reading the plan, focus your analysis on this slice.
 
 ## Your job
 
@@ -208,7 +205,7 @@ End your response with a JSON block:
 
 \\\`\\\`\\\`json
 {
-  "sliceId": "${slice.id}",
+  "sliceId": "${sliceId}",
   "title": "Updated title (or same)",
   "goal": "Updated goal (or same)",
   "acceptanceCriteria": ["Updated criteria"],
@@ -234,7 +231,7 @@ structure as the tasks array. Otherwise leave it as an empty array.`;
 
 export function planAddendum(state: PlanState): string {
   const planStatus = state.currentPlan
-    ? `\n\nCurrent plan: "${state.currentPlan.title}" (${state.currentPlan.slices.length} slices, status: ${state.currentPlan.status}, ${state.currentPlan.iterations} iterations).`
+    ? `\n\nCurrent plan: "${state.currentPlan.title}" (${state.currentPlan.slices.length} slices, status: ${state.currentPlan.status}, ${state.currentPlan.iterations} iterations). Plan file: \`${CONFIG_DIR_NAME}/${PLAN_DIR}/${PLAN_FILE}\`.`
     : "\n\nNo active plan. Use `big_brain_plan` to start planning.";
 
   return `## Implementation Spec Planner available
